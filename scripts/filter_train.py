@@ -1,96 +1,78 @@
-import os
 import json
-import shutil
-from tqdm import tqdm
+import os
+from pycocotools.coco import COCO
 
-# --- Configurações ---
+# Defina os caminhos para os arquivos
+ANNOTATION_FILE = 'data/annotations/instances_train2017.json'
+OUTPUT_ANNOTATION_FILE = 'data/annotations/instances_train2017_filtered.json'
 
-# Caminhos para os diretórios e arquivos
-original_annotations_path = 'data/annotations/instances_train2017.json'  # Caminho para o arquivo de anotações original
-original_images_dir = 'data/train2017'  # Diretório original das imagens
-
-filtered_annotations_path = 'data/annotations/instances_train2017_filtered.json'  # Caminho para o novo arquivo de anotações
-filtered_images_dir = 'data/train2017_filtered'  # Diretório para as imagens filtradas
-
-# Lista das classes de interesse
+# Lista de classes de interesse
 classes_of_interest = [
     'person', 'bicycle', 'car', 'motorcycle', 'bus', 'train', 'truck',
-    'traffic light', 'fire hydrant', 'stop sign', 'parking meter', 'dog'
+    'traffic light', 'fire hydrant', 'stop sign', 'parking meter'
 ]
 
-# --- Carregar as anotações originais ---
-print("Carregando as anotações originais...")
-with open(original_annotations_path, 'r') as f:
-    coco = json.load(f)
+# Carrega as anotações
+with open(ANNOTATION_FILE, 'r') as f:
+    coco_data = json.load(f)
 
-# --- Mapear nomes das classes para IDs ---
-print("Mapeando nomes das classes para IDs...")
-category_name_to_id = {category['name']: category['id'] for category in coco['categories']}
-category_id_to_name = {category['id']: category['name'] for category in coco['categories']}
+# Mapeamento de nome para categoria ID (IDs originais)
+category_name_to_id = {cat['name']: cat['id'] for cat in coco_data['categories']}
 
-# Filtrar as categorias de interesse
-category_ids_of_interest = [category_name_to_id[name] for name in classes_of_interest if name in category_name_to_id]
+# IDs das categorias de interesse (IDs originais)
+category_ids_of_interest = [category_name_to_id[class_name] for class_name in classes_of_interest]
 
-# --- Filtrar categorias ---
-print("Filtrando categorias...")
-filtered_categories = [category for category in coco['categories'] if category['id'] in category_ids_of_interest]
+print("IDs originais das categorias de interesse:", category_ids_of_interest)
 
-# --- Filtrar anotações ---
-print("Filtrando anotações...")
-filtered_annotations = [annotation for annotation in coco['annotations'] if annotation['category_id'] in category_ids_of_interest]
+# Criar mapeamento de IDs originais para IDs sequenciais iniciando em 0
+id_map = {original_id: idx for idx, original_id in enumerate(category_ids_of_interest)}
+print("Mapeamento de IDs originais para novos IDs:", id_map)
 
-# --- Obter IDs das imagens que contêm as categorias de interesse ---
-print("Obtendo IDs das imagens filtradas...")
-image_ids = set(annotation['image_id'] for annotation in filtered_annotations)
+# Atualizar as categorias com os novos IDs
+filtered_categories = []
+for class_name in classes_of_interest:
+    original_id = category_name_to_id[class_name]
+    new_id = id_map[original_id]
+    category = {
+        'supercategory': class_name,
+        'id': new_id,
+        'name': class_name
+    }
+    filtered_categories.append(category)
 
-# --- Filtrar imagens ---
-print("Filtrando imagens...")
-filtered_images = [image for image in coco['images'] if image['id'] in image_ids]
+print("Categorias filtradas com novos IDs:", filtered_categories)
 
-# --- Atualizar os IDs das categorias para começar em 0 ---
-print("Atualizando IDs das categorias para começar em 0...")
-old_category_id_to_new = {}
-for new_id, category in enumerate(filtered_categories):
-    old_id = category['id']
-    old_category_id_to_new[old_id] = new_id  # Começa em 0
-    category['id'] = new_id
+# Filtrar e atualizar as anotações
+filtered_annotations = []
+for ann in coco_data['annotations']:
+    original_category_id = ann['category_id']
+    if original_category_id in category_ids_of_interest:
+        # Atualizar o category_id para o novo ID
+        ann['category_id'] = id_map[original_category_id]
+        filtered_annotations.append(ann)
 
-# Atualizar 'category_id' nas anotações
-for annotation in filtered_annotations:
-    old_id = annotation['category_id']
-    annotation['category_id'] = old_category_id_to_new[old_id]
+# Obter os IDs das imagens correspondentes
+image_ids = set([ann['image_id'] for ann in filtered_annotations])
 
-# --- Criar o novo conjunto de anotações ---
-print("Criando o novo arquivo de anotações...")
-filtered_coco = {
-    'info': coco['info'],
-    'licenses': coco['licenses'],
+print(f"Número de anotações filtradas: {len(filtered_annotations)}")
+print(f"Número de imagens correspondentes: {len(image_ids)}")
+
+# Filtrar as imagens
+filtered_images = [img for img in coco_data['images'] if img['id'] in image_ids]
+
+print(f"Número de imagens filtradas: {len(filtered_images)}")
+
+# Criar o novo dicionário de anotações
+filtered_coco_data = {
+    'info': coco_data.get('info', {}),
+    'licenses': coco_data.get('licenses', []),
     'images': filtered_images,
     'annotations': filtered_annotations,
     'categories': filtered_categories
 }
 
-with open(filtered_annotations_path, 'w') as f:
-    json.dump(filtered_coco, f)
+# Salvar o novo arquivo de anotações
+with open(OUTPUT_ANNOTATION_FILE, 'w') as f:
+    json.dump(filtered_coco_data, f)
 
-print(f"Novo arquivo de anotações salvo em: {filtered_annotations_path}")
-
-# --- Copiar as imagens filtradas para um novo diretório ---
-print("Copiando imagens filtradas para o novo diretório...")
-if not os.path.exists(filtered_images_dir):
-    os.makedirs(filtered_images_dir)
-
-for image in tqdm(filtered_images, desc="Copiando imagens"):
-    image_filename = image['file_name']
-    src = os.path.join(original_images_dir, image_filename)
-    dst = os.path.join(filtered_images_dir, image_filename)
-    if os.path.exists(src):
-        shutil.copyfile(src, dst)
-    else:
-        print(f"A imagem {image_filename} não foi encontrada no diretório original.")
-
-print(f"Imagens copiadas para: {filtered_images_dir}")
-
-print("Processo concluído com sucesso!")
-print(f"Total de imagens filtradas: {len(filtered_images)}")
-print(f"Total de anotações filtradas: {len(filtered_annotations)}")
+print(f"Novo arquivo de anotações salvo em {OUTPUT_ANNOTATION_FILE}")
