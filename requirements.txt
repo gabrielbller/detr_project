@@ -1,0 +1,13 @@
+numpy
+matplotlib
+opencv-python
+supervision==0.3.0
+transformers==4.31
+pytorch-lightning==2.0.5
+tensorboardX
+tensorboard
+scipy
+roboflow
+timm
+cython
+pycocotools
