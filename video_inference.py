@@ -6,7 +6,7 @@ import numpy as np
 from transformers import DetrForObjectDetection, DetrImageProcessor
 
 # Configurações
-CONFIDENCE_THRESHOLD = 0.5
+CONFIDENCE_THRESHOLD = 0.6
 CHECKPOINT = "facebook/detr-resnet-50"
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
@@ -49,7 +49,7 @@ danger_levels = {
 
 # Definir os pesos para os níveis de perigo
 danger_weights = {
-    'muito_alto': 4,
+    'muito_alto': 5,
     'alto': 3,
     'medio': 2,
     'baixo': 1
@@ -71,7 +71,7 @@ def get_proximity_weight(normalized_area):
         return 1  # Distante
 
 # Configurar a captura de vídeo
-video_path = 'inference/video3.mp4'
+video_path = 'inference/jorge/jorge1.MP4'
 cap = cv2.VideoCapture(video_path)
 
 box_annotator = sv.BoxAnnotator()
@@ -163,9 +163,9 @@ while True:
             total_risk += object_risk
 
     # Classificar a cena com base no risco total
-    if total_risk >= 80:
+    if total_risk >= 60:
         risk_level = 'STOP'
-    elif total_risk >= 50:
+    elif total_risk >= 45:
         risk_level = 'WARNING DANGER AHEAD'
     elif total_risk >= 20:
         risk_level = 'SLOW DOWN'
