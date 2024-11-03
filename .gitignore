@@ -1,3 +1,5 @@
 /datasets
 /outputs
 /lightning_logs
+/inference
+/treinamento_antigo
