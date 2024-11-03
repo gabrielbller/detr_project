@@ -211,14 +211,6 @@ class Detr(pl.LightningModule):
     def val_dataloader(self):
         return VAL_DATALOADER
 
-"""**NOTE:** Let's start `tensorboard`."""
-
-# Commented out IPython magic to ensure Python compatibility.
-# %cd {HOME}
-
-# %load_ext tensorboard
-# %tensorboard --logdir lightning_logs/
-
 model = Detr(lr=1e-4, lr_backbone=1e-5, weight_decay=1e-4)
 
 batch = next(iter(TRAIN_DATALOADER))
@@ -232,7 +224,7 @@ from pytorch_lightning import Trainer
 # %cd {HOME}
 
 # settings
-MAX_EPOCHS = 150
+MAX_EPOCHS = 400
 
 trainer = Trainer(devices=1, accelerator="gpu", max_epochs=MAX_EPOCHS, gradient_clip_val=0.1, accumulate_grad_batches=8, log_every_n_steps=5)
 

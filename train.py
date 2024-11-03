@@ -2,6 +2,14 @@ import roboflow
 import supervision
 import transformers
 import pytorch_lightning
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
+import random
+import cv2
+import numpy as np
+import supervision as sv
+import os
+import torchvision
 
 """### Load Model"""
 
@@ -17,11 +25,8 @@ IOU_THRESHOLD = 0.8
 
 image_processor = DetrImageProcessor.from_pretrained(CHECKPOINT)
 
-import os
-import torchvision
-
 # caminho onde o dataset for instalado
-dataset = '/datasets/Obstacle-detection-11'
+dataset = os.path.join("datasets", "Obstacle-detection-11")
 # settings
 ANNOTATION_FILE_NAME = "_annotations.coco.json"
 TRAIN_DIRECTORY = os.path.join(dataset, "train")
@@ -67,18 +72,6 @@ TEST_DATASET = CocoDetection(
 print("Number of training examples:", len(TRAIN_DATASET))
 print("Number of validation examples:", len(VAL_DATASET))
 print("Number of test examples:", len(TEST_DATASET))
-
-"""## Visualize data entry
-
-**NOTE:** Feel free to reload this cell multiple times. Notebook should display different train set image each time.
-"""
-
-# Commented out IPython magic to ensure Python compatibility.
-import random
-import cv2
-import numpy as np
-import supervision as sv
-
 
 # select random image
 image_ids = TRAIN_DATASET.coco.getImgIds()
@@ -207,14 +200,6 @@ class Detr(pl.LightningModule):
     def val_dataloader(self):
         return VAL_DATALOADER
 
-"""**NOTE:** Let's start `tensorboard`."""
-
-# Commented out IPython magic to ensure Python compatibility.
-# %cd {HOME}
-
-# %load_ext tensorboard
-# %tensorboard --logdir lightning_logs/
-
 model = Detr(lr=1e-4, lr_backbone=1e-5, weight_decay=1e-4)
 
 batch = next(iter(TRAIN_DATALOADER))
@@ -222,11 +207,8 @@ outputs = model(pixel_values=batch['pixel_values'], pixel_mask=batch['pixel_mask
 
 outputs.logits.shape
 
-# Commented out IPython magic to ensure Python compatibility.
-from pytorch_lightning import Trainer
-from pytorch_lightning.callbacks import ModelCheckpoint
-
-# %cd {HOME}
+num_classes_model = model.model.class_labels_classifier.out_features
+print(f"Número de classes no modelo: {num_classes_model}")
 
 # settings
 MAX_EPOCHS = 1

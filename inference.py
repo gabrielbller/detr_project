@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from transformers import DetrForObjectDetection, DetrImageProcessor
 
 # Defina o limiar de confiança para as detecções
-CONFIDENCE_TRESHOLD = 0.9
+CONFIDENCE_TRESHOLD = 0.8
 # Configurações atualizadas
 CHECKPOINT = "facebook/detr-resnet-50"
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -21,8 +21,9 @@ ANNOTATION_FILE_NAME = "_annotations.coco.json"
 TEST_DIRECTORY = os.path.join(dataset, "test")
 
 # Carrega o modelo e o processador de imagens
-model = DetrForObjectDetection.from_pretrained('outputs')
+model = torch.load('outputs/detr_model_complete.pt')
 model.to(DEVICE)
+model.eval()
 
 image_processor = DetrImageProcessor.from_pretrained(CHECKPOINT)
 

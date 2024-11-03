@@ -6,13 +6,14 @@ import numpy as np
 from transformers import DetrForObjectDetection, DetrImageProcessor
 
 # Configurações
-CONFIDENCE_THRESHOLD = 0.6
+CONFIDENCE_THRESHOLD = 0.7
 CHECKPOINT = "facebook/detr-resnet-50"
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # Carregar o modelo treinado
-model = DetrForObjectDetection.from_pretrained('outputs')
+model = torch.load('outputs/detr_model_complete.pt')
 model.to(DEVICE)
+model.eval()
 
 # Carregar o image_processor
 image_processor = DetrImageProcessor.from_pretrained(CHECKPOINT)
@@ -71,7 +72,7 @@ def get_proximity_weight(normalized_area):
         return 1  # Distante
 
 # Configurar a captura de vídeo
-video_path = 'inference/jorge/jorge1.MP4'
+video_path = 'inference/video2.MP4'
 cap = cv2.VideoCapture(video_path)
 
 box_annotator = sv.BoxAnnotator()
@@ -125,8 +126,8 @@ while True:
     total_risk = 0
 
     # Definir os limites da zona central (aumentada)
-    central_zone_left = image_width * 0.30
-    central_zone_right = image_width * 0.70
+    central_zone_left = image_width * 0.25
+    central_zone_right = image_width * 0.75
 
     # Avaliar as áreas de risco e calcular o risco total
     for bbox, class_id in zip(detections.xyxy, detections.class_id):

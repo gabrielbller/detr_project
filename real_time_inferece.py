@@ -11,8 +11,9 @@ CHECKPOINT = "facebook/detr-resnet-50"
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
 # Carregar o modelo treinado
-model = DetrForObjectDetection.from_pretrained('outputs')
+model = torch.load('outputs/detr_model_complete.pt')
 model.to(DEVICE)
+model.eval()
 
 # Carregar o image_processor
 image_processor = DetrImageProcessor.from_pretrained(CHECKPOINT)
