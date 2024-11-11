@@ -1,5 +1,8 @@
 import os
+import time
+import numpy as np
 import torch
+import psutil 
 import torchvision
 from torchvision.ops import box_iou
 from tqdm import tqdm
@@ -9,8 +12,8 @@ from torchmetrics.detection.mean_ap import MeanAveragePrecision
 # Configurações
 DEVICE = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 CHECKPOINT = 'facebook/detr-resnet-50'
-CONFIDENCE_THRESHOLD = 0.7
-IOU_THRESHOLD = 0.7
+CONFIDENCE_THRESHOLD = 0.9
+IOU_THRESHOLD = 0.1
 
 dataset = os.path.join("datasets", "Obstacle-detection-11")
 ANNOTATION_FILE_NAME = "_annotations.coco.json"
@@ -22,6 +25,14 @@ model.to(DEVICE)
 model.eval()
 
 image_processor = DetrImageProcessor.from_pretrained(CHECKPOINT)
+
+# Para armazenar tempos e memória de cada etapa
+preprocess_times = []
+inference_times = []
+postprocess_times = []
+preprocess_memory = []
+inference_memory = []
+postprocess_memory = []
 
 def collate_fn(batch):
     pixel_values = [item[0] for item in batch]
@@ -80,15 +91,32 @@ metric_map = MeanAveragePrecision(iou_thresholds=[IOU_THRESHOLD])
 print("Executando avaliação...")
 
 for batch_idx, batch in enumerate(tqdm(TEST_DATALOADER)):
+    start_memory = psutil.Process(os.getpid()).memory_info().rss  # Memória no início (em bytes)
+    
+    # Pré-processamento
+    preprocess_start_time = time.time()
     pixel_values = batch["pixel_values"].to(DEVICE)
     pixel_mask = batch["pixel_mask"].to(DEVICE)
     labels = [{k: v.to(DEVICE) for k, v in t.items()} for t in batch["labels"]]
-
+    preprocess_end_time = time.time()
+    preprocess_times.append(preprocess_end_time - preprocess_start_time)
+    preprocess_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
+    
+    # Inferência
+    inference_start_time = time.time()
     with torch.no_grad():
         outputs = model(pixel_values=pixel_values, pixel_mask=pixel_mask)
+    inference_end_time = time.time()
+    inference_times.append(inference_end_time - inference_start_time)
+    inference_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
+    # Pós-processamento
+    postprocess_start_time = time.time()
     orig_target_sizes = torch.stack([target["orig_size"] for target in labels], dim=0)
     results = image_processor.post_process_object_detection(outputs, target_sizes=orig_target_sizes)
+    postprocess_end_time = time.time()
+    postprocess_times.append(postprocess_end_time - postprocess_start_time)
+    postprocess_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
     for target, result in zip(labels, results):
         gt_boxes = target['boxes']  # Formato [cx, cy, w, h]
@@ -178,13 +206,41 @@ for batch_idx, batch in enumerate(tqdm(TEST_DATALOADER)):
 precision = TP / (TP + FP) if TP + FP > 0 else 0
 recall = TP / (TP + FN) if TP + FN > 0 else 0
 f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+accuracy = TP / (TP + FP + FN) if TP + FP + FN > 0 else 0
 
 # Obter as métricas de AP e mAP
 map_metrics = metric_map.compute()
 average_precision = map_metrics['map']
 
+# Cálculo de tempos e uso de memória
+total_preprocess_time = sum(preprocess_times)
+total_inference_time = sum(inference_times)
+total_postprocess_time = sum(postprocess_times)
+total_time = total_preprocess_time + total_inference_time + total_postprocess_time
+
+avg_preprocess_memory = np.mean(preprocess_memory) / (1024 ** 2)
+avg_inference_memory = np.mean(inference_memory) / (1024 ** 2)
+avg_postprocess_memory = np.mean(postprocess_memory) / (1024 ** 2)
+total_memory = avg_preprocess_memory + avg_inference_memory + avg_postprocess_memory
+
+avg_fps = 1 / np.mean(inference_times)
+
 print("\nMétricas gerais de detecção:")
 print(f"Precisão: {precision:.4f}")
 print(f"Recall: {recall:.4f}")
 print(f"F1-Score: {f1_score:.4f}")
+print(f"Acurácia: {accuracy:.4f}")
 print(f"Precisão Média (mAP) @ IoU={IOU_THRESHOLD}: {average_precision:.4f}")
+
+print("\nMétricas de desempenho:")
+print(f"Tempo total de pré-processamento: {total_preprocess_time:.4f} s")
+print(f"Tempo total de inferência: {total_inference_time:.4f} s")
+print(f"Tempo total de pós-processamento: {total_postprocess_time:.4f} s")
+print(f"Tempo total de execução: {total_time:.4f} s")
+print(f"FPS médio: {avg_fps:.2f}")
+
+print("\nConsumo médio de memória:")
+print(f"Média de memória para pré-processamento: {avg_preprocess_memory:.2f} MB")
+print(f"Média de memória para inferência: {avg_inference_memory:.2f} MB")
+print(f"Média de memória para pós-processamento: {avg_postprocess_memory:.2f} MB")
+print(f"Memória total consumida: {total_memory:.2f} MB")
