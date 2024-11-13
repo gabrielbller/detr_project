@@ -206,7 +206,6 @@ for batch_idx, batch in enumerate(tqdm(TEST_DATALOADER)):
 precision = TP / (TP + FP) if TP + FP > 0 else 0
 recall = TP / (TP + FN) if TP + FN > 0 else 0
 f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-accuracy = TP / (TP + FP + FN) if TP + FP + FN > 0 else 0
 
 # Obter as métricas de AP e mAP
 map_metrics = metric_map.compute()
@@ -229,7 +228,6 @@ print("\nMétricas gerais de detecção:")
 print(f"Precisão: {precision:.4f}")
 print(f"Recall: {recall:.4f}")
 print(f"F1-Score: {f1_score:.4f}")
-print(f"Acurácia: {accuracy:.4f}")
 print(f"Precisão Média (mAP) @ IoU={IOU_THRESHOLD}: {average_precision:.4f}")
 
 print("\nMétricas de desempenho:")
