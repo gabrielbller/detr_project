@@ -3,3 +3,6 @@
 /lightning_logs
 /inference
 /treinamento_antigo
+/yolo
+/runs
+/output_videos
