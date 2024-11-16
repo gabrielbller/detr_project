@@ -17,6 +17,15 @@ EXCLUSION_ZONE_HEIGHT_RATIO = 0.3  # Excluir 30% superior da imagem
 # Multiplicador de perigo adicional para objetos dentro do trapézio
 TRAPEZOID_DANGER_MULTIPLIER = 2
 
+# Definir cores para cada nível de risco (em formato BGR)
+risk_colors = {
+    'muito_alto': (0, 0, 255),    # Vermelho
+    'alto': (0, 165, 255),        # Laranja
+    'medio': (0, 255, 255),       # Amarelo
+    'baixo': (0, 255, 0),         # Verde
+    'nenhum': (255, 255, 255)     # Branco
+}
+
 # Carregar o modelo treinado
 model = torch.load('outputs/detr_model_complete.pt')
 model.to(DEVICE)
@@ -69,10 +78,11 @@ def get_proximity_weight_exp(normalized_area):
     return int(5 * math.exp(-5 * (1 - normalized_area))) + 1
 
 # Configurar a captura de vídeo
-video_path = 'inference/jorge6.MP4'
+video_path = 'inference/jorge10.MP4'
 cap = cv2.VideoCapture(video_path)
 
-box_annotator = sv.BoxAnnotator()
+# Inicializar o BoxAnnotator (não será usado diretamente neste caso)
+# box_annotator = sv.BoxAnnotator()
 
 while True:
     ret, frame = cap.read()
@@ -138,6 +148,9 @@ while True:
         for class_id, confidence in zip(detections.class_id, detections.confidence)
     ]
 
+    # Lista para armazenar as cores das caixas
+    box_colors = []
+
     # Variável para acumular o risco total
     total_risk = 0
     warning_message = ""  # Variável para armazenar mensagem de alerta
@@ -149,7 +162,7 @@ while True:
     bottom_right = (int(image_width * 0.90), image_height)
 
     # Avaliar as áreas de risco e calcular o risco total
-    for bbox, class_id in zip(detections.xyxy, detections.class_id):
+    for bbox, class_id, confidence in zip(detections.xyxy, detections.class_id, detections.confidence):
         label = id2label[class_id]
         x1, y1, x2, y2 = bbox
         x_center = (x1 + x2) / 2
@@ -183,6 +196,22 @@ while True:
         # Acumular o risco total
         total_risk += object_risk
 
+        # Determinar o nível de risco individual com base no risco do objeto
+        if object_risk >= 40:
+            individual_risk_level = 'muito_alto'
+        elif object_risk >= 10:
+            individual_risk_level = 'alto'
+        elif object_risk >= 3:
+            individual_risk_level = 'medio'
+        elif object_risk >= 1:
+            individual_risk_level = 'baixo'
+        else:
+            individual_risk_level = 'nenhum'
+
+        # Obter a cor correspondente ao nível de risco individual
+        box_color = risk_colors.get(individual_risk_level, (255, 255, 255))  # Branco como padrão
+        box_colors.append(box_color)
+
     # Classificar a cena com base no risco total atualizado
     if total_risk >= 60:
         risk_level = 'PARE'
@@ -193,8 +222,12 @@ while True:
     else:
         risk_level = 'SEGURO'
 
-    # Anotar o frame
-    frame = box_annotator.annotate(scene=frame, detections=detections, labels=labels_text)
+    # Anotar o frame com as cores correspondentes
+    for bbox, label_text, color in zip(detections.xyxy, labels_text, box_colors):
+        x1, y1, x2, y2 = map(int, bbox)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        cv2.putText(frame, label_text, (x1, y1 - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
 
     # Desenhar o trapézio de detecção na imagem
     cv2.line(frame, top_left, bottom_left, (0, 255, 0), 2)
@@ -203,7 +236,7 @@ while True:
     cv2.line(frame, bottom_left, bottom_right, (0, 255, 0), 2)
 
     # Exibir o nível de risco no frame
-    cv2.putText(frame, f"Risco: {risk_level} ({total_risk})", (10, 70),
+    cv2.putText(frame, f"Risco: {risk_level} ({int(total_risk)})", (10, 70),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
     # Exibir mensagem de alerta de buraco, se detectado
