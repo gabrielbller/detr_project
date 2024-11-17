@@ -123,6 +123,7 @@ for image_path in tqdm(image_paths):
 precision = TP / (TP + FP) if TP + FP > 0 else 0
 recall = TP / (TP + FN) if TP + FN > 0 else 0
 f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
+accuracy = TP / (TP + FP + FN) if (TP + FP + FN) > 0 else 0  # Cálculo da acurácia
 
 # Calcular desempenho
 total_preprocess_time = sum(preprocess_times)
@@ -141,6 +142,7 @@ print("\nMétricas gerais de detecção:")
 print(f"Precisão: {precision:.4f}")
 print(f"Recall: {recall:.4f}")
 print(f"F1-Score: {f1_score:.4f}")
+print(f"Acurácia: {accuracy:.4f}")  # Exibindo a acurácia
 
 print("\nMétricas de desempenho:")
 print(f"Tempo total de pré-processamento: {total_preprocess_time:.4f} s")
