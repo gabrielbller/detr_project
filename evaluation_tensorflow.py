@@ -7,13 +7,10 @@ import psutil
 from tqdm import tqdm
 
 # Configurar crescimento de memória dinâmica para evitar erros de alocação
-physical_devices = tf.config.list_physical_devices('GPU')
-if physical_devices:
-    try:
-        tf.config.experimental.set_memory_growth(physical_devices[0], True)
-        print("Crescimento de memória dinâmica configurado para a GPU.")
-    except RuntimeError as e:
-        print(f"Erro ao configurar crescimento de memória dinâmica: {e}")
+gpus = tf.config.experimental.list_physical_devices('GPU')
+for gpu in gpus:
+    tf.config.experimental.set_memory_growth(gpu, True)
+    print("Crescimento de memória dinâmica configurado para a GPU.")
 
 # Configurações do modelo
 MODEL_PATH = "detr_tf_model"
