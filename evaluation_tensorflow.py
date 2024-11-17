@@ -81,25 +81,25 @@ for image_path in tqdm(image_paths):
     image = cv2.imread(image_path)
 
     # Pré-processamento
-    preprocess_start_time = time.time()
+    preprocess_start_time = time.time_ns()
     input_tensor, original_shape = preprocess_image(image)
     pixel_mask = np.ones((1, IMAGE_SIZE[0], IMAGE_SIZE[1]), dtype=np.float32)  # Criar máscara de pixels válidos
-    preprocess_end_time = time.time()
-    preprocess_times.append(preprocess_end_time - preprocess_start_time)
+    preprocess_end_time = time.time_ns()
+    preprocess_times.append((preprocess_end_time - preprocess_start_time) / 1e9)
     preprocess_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
     # Inferência
-    inference_start_time = time.time()
+    inference_start_time = time.time_ns()
     outputs = infer(pixel_values=tf.constant(input_tensor), pixel_mask=tf.constant(pixel_mask))
-    inference_end_time = time.time()
-    inference_times.append(inference_end_time - inference_start_time)
+    inference_end_time = time.time_ns()
+    inference_times.append((inference_end_time - inference_start_time) / 1e9)
     inference_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
     # Pós-processamento
-    postprocess_start_time = time.time()
+    postprocess_start_time = time.time_ns()
     boxes, scores, classes = postprocess_outputs(outputs, original_shape)
-    postprocess_end_time = time.time()
-    postprocess_times.append(postprocess_end_time - postprocess_start_time)
+    postprocess_end_time = time.time_ns()
+    postprocess_times.append((postprocess_end_time - postprocess_start_time) / 1e9)
     postprocess_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
     # Simulação de GT (substituir por dados reais)
