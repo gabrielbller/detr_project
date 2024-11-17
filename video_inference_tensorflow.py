@@ -260,11 +260,22 @@ def draw_detections_and_calculate_risk(image, boxes, classes, scores, frame_coun
 # Carregar o modelo TensorFlow
 model = tf.saved_model.load(MODEL_PATH)
 
+# Verificar dispositivo (GPU ou CPU)
+print("Dispositivos disponíveis para TensorFlow:")
+devices = tf.config.list_physical_devices()
+for device in devices:
+    print(f"Nome: {device.name}, Tipo: {device.device_type}")
+
+if tf.config.list_physical_devices('GPU'):
+    print("TensorFlow está utilizando GPU.")
+else:
+    print("TensorFlow está utilizando CPU.")
+
 # Função de inferência
 infer = model.signatures['serving_default']
 
 # Abrir o vídeo
-VIDEO_PATH = "inference/jorge10.MP4"  # Substitua pelo caminho do seu vídeo
+VIDEO_PATH = "inference/jorge20.mp4"  # Substitua pelo caminho do seu vídeo
 cap = cv2.VideoCapture(VIDEO_PATH)
 
 # Verificar se o vídeo foi aberto corretamente
