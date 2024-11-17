@@ -8,18 +8,16 @@ IMAGE_PATH = "path/to/your/image.jpg"  # Substitua pelo caminho da sua imagem
 LABELS = ['Person-Mony-Bus-Tramway-Car-Tree', 'Bicycle', 'Bus', 'Car', 'Dog', 'Electric pole', 'Motorcycle', 'Person', 'Traffic signs', 'Tree', 'Uncovered manhole']
 CONFIDENCE_THRESHOLD = 0.2
 
-# Configurações de pré-processamento
-IMAGE_SIZE = (720, 1280)
+# Configurações de normalização
 MEAN = np.array([0.485, 0.456, 0.406])
 STD = np.array([0.229, 0.224, 0.225])
 
 # Função para pré-processar a imagem
 def preprocess_image(image):
-    image_resized = cv2.resize(image, (IMAGE_SIZE[1], IMAGE_SIZE[0]))
-    image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
+    image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
     image_normalized = (image_rgb / 255.0 - MEAN) / STD
     image_expanded = np.expand_dims(image_normalized, axis=0).astype(np.float32)
-    return image_expanded, image_resized.shape[:2]
+    return image_expanded, image.shape[:2]
 
 # Função para pós-processar as saídas do modelo
 def postprocess_outputs(outputs, original_shape):
@@ -58,7 +56,7 @@ image = cv2.imread(IMAGE_PATH)
 input_tensor, original_shape = preprocess_image(image)
 
 # Criar a máscara de pixels válidos
-pixel_mask = np.ones((1, IMAGE_SIZE[0], IMAGE_SIZE[1]), dtype=np.float32)
+pixel_mask = np.ones((1, original_shape[0], original_shape[1]), dtype=np.float32)
 
 # Realizar a inferência
 print("Realizando a inferência...")
@@ -76,6 +74,6 @@ cv2.waitKey(0)
 cv2.destroyAllWindows()
 
 # Salvar a imagem com as detecções
-output_path = "inference/output_image.jpg"
+output_path = "output_image.jpg"
 cv2.imwrite(output_path, image_with_detections)
 print(f"Imagem salva em: {output_path}")
