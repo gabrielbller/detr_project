@@ -2,6 +2,7 @@ import tensorflow as tf
 import cv2
 import numpy as np
 import math
+import time  # Import necessário para medir o tempo
 
 # Parâmetros do modelo
 MODEL_PATH = "detr_tf_model"  # Caminho para o modelo TensorFlow salvo
@@ -10,7 +11,7 @@ NUM_CLASSES = len(LABELS)
 CONFIDENCE_THRESHOLD = 0.2   # Limite de confiança para exibir detecções
 
 # Parâmetros de pré-processamento
-IMAGE_SIZE = (1334, 1334)  # Ajuste conforme necessário
+IMAGE_SIZE = (720, 1280)  # Ajustado para 720p (altura, largura)
 MEAN = np.array([0.485, 0.456, 0.406])  # Média usada na normalização
 STD = np.array([0.229, 0.224, 0.225])   # Desvio padrão usado na normalização
 
@@ -58,8 +59,8 @@ def get_proximity_weight_exp(normalized_area):
 
 # Função para pré-processar as imagens
 def preprocess_image(image):
-    # Redimensionar a imagem
-    image_resized = cv2.resize(image, IMAGE_SIZE)
+    # Redimensionar a imagem para IMAGE_SIZE
+    image_resized = cv2.resize(image, (IMAGE_SIZE[1], IMAGE_SIZE[0]))
     
     # Converter BGR para RGB
     image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
@@ -73,10 +74,10 @@ def preprocess_image(image):
     # Expandir dimensões para (1, C, H, W)
     image_expanded = np.expand_dims(image_transposed, axis=0).astype(np.float32)
     
-    return image_expanded
+    return image_expanded, image_resized.shape[:2]  # Retorna também o tamanho do frame processado
 
 # Função para pós-processar as saídas do modelo
-def postprocess_outputs(outputs, original_image_shape):
+def postprocess_outputs(outputs, original_image_shape, processed_image_shape):
     logits = outputs['logits'][0].numpy()        # (num_queries, num_classes)
     pred_boxes = outputs['pred_boxes'][0].numpy()  # (num_queries, 4)
 
@@ -119,11 +120,11 @@ def postprocess_outputs(outputs, original_image_shape):
 
     # Converter caixas para coordenadas da imagem original
     h_o, w_o = original_image_shape[:2]
-    h, w = IMAGE_SIZE
-    scale_x = w_o / w
-    scale_y = h_o / h
+    h_p, w_p = processed_image_shape  # Tamanho da imagem após o pré-processamento
+    scale_x = w_o / w_p
+    scale_y = h_o / h_p
 
-    boxes_scaled = filtered_boxes * [w, h, w, h]
+    boxes_scaled = filtered_boxes * [w_p, h_p, w_p, h_p]
     boxes_scaled[:, [0, 2]] *= scale_x  # Ajuste no eixo x
     boxes_scaled[:, [1, 3]] *= scale_y  # Ajuste no eixo y
 
@@ -136,8 +137,8 @@ def postprocess_outputs(outputs, original_image_shape):
 
     return boxes_converted, filtered_classes, filtered_scores
 
-# Função para desenhar detecções e calcular riscos
-def draw_detections_and_calculate_risk(image, boxes, classes, scores, frame_count):
+# Função para desenhar detecções, calcular riscos e exibir o FPS médio
+def draw_detections_and_calculate_risk(image, boxes, classes, scores, frame_count, avg_fps):
     total_risk = 0
     warning_message = ""
 
@@ -146,7 +147,6 @@ def draw_detections_and_calculate_risk(image, boxes, classes, scores, frame_coun
 
     # Definir zona de exclusão
     exclusion_zone_height = int(EXCLUSION_ZONE_HEIGHT_RATIO * image_height)
-    cv2.rectangle(image, (0, 0), (image_width, exclusion_zone_height), (0, 0, 0), -1)
     overlay = image.copy()
     cv2.rectangle(overlay, (0, 0), (image_width, exclusion_zone_height), (0, 0, 0), -1)
     image = cv2.addWeighted(overlay, 0.5, image, 0.5, 0)
@@ -189,8 +189,12 @@ def draw_detections_and_calculate_risk(image, boxes, classes, scores, frame_coun
         danger_weight = danger_weights.get(danger_level, 1)
 
         # Verificar se o objeto está dentro do trapézio de detecção
-        if (x_center > top_left[0] and x_center < top_right[0] and
-                y_center > top_left[1] and y_center < bottom_left[1]):
+        in_trapezoid = (
+            x_center > top_left[0] and x_center < top_right[0] and
+            y_center > top_left[1] and y_center < bottom_left[1]
+        )
+
+        if in_trapezoid:
             # Aplicar o multiplicador de perigo adicional para objetos dentro do trapézio
             object_risk = danger_weight * proximity_weight * TRAPEZOID_DANGER_MULTIPLIER
         else:
@@ -243,6 +247,14 @@ def draw_detections_and_calculate_risk(image, boxes, classes, scores, frame_coun
         cv2.putText(image, warning_message, (10, 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
+    # Exibir o FPS médio no canto superior direito
+    fps_text = f"FPS Medio: {avg_fps:.2f}"
+    text_size, _ = cv2.getTextSize(fps_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
+    text_x = image_width - text_size[0] - 10
+    text_y = 30
+    cv2.putText(image, fps_text, (text_x, text_y),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2, cv2.LINE_AA)
+
     return image
 
 # Carregar o modelo TensorFlow
@@ -260,17 +272,13 @@ if not cap.isOpened():
     print("Erro ao abrir o vídeo.")
     exit()
 
-# Obter propriedades do vídeo
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-fps = cap.get(cv2.CAP_PROP_FPS)
-
-# Definir o codec e criar o objeto VideoWriter
-out = cv2.VideoWriter('video_output.mp4',
-                      cv2.VideoWriter_fourcc(*'mp4v'), fps,
-                      (frame_width, frame_height))
+# Definir o codec e criar o objeto VideoWriter para salvar o vídeo em 720p
+out = cv2.VideoWriter('video_output_720p.mp4',
+                      cv2.VideoWriter_fourcc(*'mp4v'), 30,  # Você pode ajustar o FPS conforme necessário
+                      (1280, 720))  # Resolução 720p
 
 frame_count = 0  # Contador de frames
+total_time = 0.0  # Tempo total de processamento
 
 # Processar o vídeo quadro a quadro
 while cap.isOpened():
@@ -279,9 +287,13 @@ while cap.isOpened():
         break
 
     frame_count += 1
+    start_time = time.time()  # Iniciar contagem de tempo
+
+    # Redimensionar o frame para 720p
+    frame_resized = cv2.resize(frame, (1280, 720))
 
     # Pré-processar o quadro
-    input_tensor = preprocess_image(frame)
+    input_tensor, processed_image_shape = preprocess_image(frame_resized)
 
     # Criar a máscara de pixel (todos os pixels são válidos)
     pixel_mask = np.ones((1, IMAGE_SIZE[0], IMAGE_SIZE[1]), dtype=np.float32)
@@ -294,10 +306,18 @@ while cap.isOpened():
     outputs = infer(**inputs)
 
     # Pós-processar as saídas
-    boxes, classes, scores = postprocess_outputs(outputs, frame.shape)
+    boxes, classes, scores = postprocess_outputs(outputs, frame_resized.shape, processed_image_shape)
 
-    # Desenhar detecções e calcular riscos no quadro original
-    frame_with_detections = draw_detections_and_calculate_risk(frame, boxes, classes, scores, frame_count)
+    # Calcular o tempo de processamento do frame
+    end_time = time.time()
+    elapsed_time = end_time - start_time
+    total_time += elapsed_time
+
+    # Calcular o FPS médio
+    avg_fps = frame_count / total_time
+
+    # Desenhar detecções, calcular riscos e exibir FPS no quadro original
+    frame_with_detections = draw_detections_and_calculate_risk(frame_resized, boxes, classes, scores, frame_count, avg_fps)
 
     # Exibir o quadro com detecções (opcional)
     cv2.imshow('Detections', frame_with_detections)
