@@ -19,7 +19,7 @@ STD = np.array([0.229, 0.224, 0.225])
 # Caminhos do dataset
 dataset = os.path.join("datasets", "Obstacle-detection-11")
 ANNOTATION_FILE_NAME = "_annotations.coco.json"
-TEST_DIRECTORY = os.path.join(dataset, "test")
+TEST_DIRECTORY = os.path.join(dataset, "test_single_image")
 
 # Funções auxiliares
 def preprocess_image(image):
@@ -81,25 +81,25 @@ for image_path in tqdm(image_paths):
     image = cv2.imread(image_path)
 
     # Pré-processamento
-    preprocess_start_time = time.time_ns()
+    preprocess_start_time = time.time()
     input_tensor, original_shape = preprocess_image(image)
     pixel_mask = np.ones((1, IMAGE_SIZE[0], IMAGE_SIZE[1]), dtype=np.float32)  # Criar máscara de pixels válidos
-    preprocess_end_time = time.time_ns()
-    preprocess_times.append((preprocess_end_time - preprocess_start_time) / 1e9)
+    preprocess_end_time = time.time()
+    preprocess_times.append(preprocess_end_time - preprocess_start_time)
     preprocess_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
     # Inferência
-    inference_start_time = time.time_ns()
+    inference_start_time = time.time()
     outputs = infer(pixel_values=tf.constant(input_tensor), pixel_mask=tf.constant(pixel_mask))
-    inference_end_time = time.time_ns()
-    inference_times.append((inference_end_time - inference_start_time) / 1e9)
+    inference_end_time = time.time()
+    inference_times.append(inference_end_time - inference_start_time)
     inference_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
     # Pós-processamento
-    postprocess_start_time = time.time_ns()
+    postprocess_start_time = time.time()
     boxes, scores, classes = postprocess_outputs(outputs, original_shape)
-    postprocess_end_time = time.time_ns()
-    postprocess_times.append((postprocess_end_time - postprocess_start_time) / 1e9)
+    postprocess_end_time = time.time()
+    postprocess_times.append(postprocess_end_time - postprocess_start_time)
     postprocess_memory.append(psutil.Process(os.getpid()).memory_info().rss - start_memory)
 
     # Simulação de GT (substituir por dados reais)
