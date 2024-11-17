@@ -6,6 +6,18 @@ import time
 import psutil
 from tqdm import tqdm
 
+# Configuração para uso de GPU
+gpus = tf.config.experimental.list_physical_devices('GPU')
+if gpus:
+    try:
+        for gpu in gpus:
+            tf.config.experimental.set_memory_growth(gpu, True)
+        print(f"{len(gpus)} GPU(s) disponível(is): Configurada(s) para uso.")
+    except RuntimeError as e:
+        print(f"Erro ao configurar a GPU: {e}")
+else:
+    print("Nenhuma GPU detectada. Verifique a instalação do TensorFlow.")
+
 # Configurações do modelo
 MODEL_PATH = "detr_tf_model"
 LABELS = ['Person-Mony-Bus-Tramway-Car-Tree', 'Bicycle', 'Bus', 'Car', 'Dog', 'Electric pole', 'Motorcycle', 'Person', 'Traffic signs', 'Tree', 'Uncovered manhole']
@@ -106,7 +118,7 @@ for image_path in tqdm(image_paths):
     gt_boxes = np.array([[50, 50, 200, 200]])  # Substituir por ground truth real
     gt_classes = np.array([1])
 
-    # Calcular métricas (substitua pela lógica real de correspondência GT-Pred)
+    # Calcular métricas
     matched_pred, matched_gt = set(), set()
     for i, pred_box in enumerate(boxes):
         for j, gt_box in enumerate(gt_boxes):
@@ -123,7 +135,7 @@ for image_path in tqdm(image_paths):
 precision = TP / (TP + FP) if TP + FP > 0 else 0
 recall = TP / (TP + FN) if TP + FN > 0 else 0
 f1_score = 2 * (precision * recall) / (precision + recall) if precision + recall > 0 else 0
-accuracy = TP / (TP + FP + FN) if (TP + FP + FN) > 0 else 0  # Cálculo da acurácia
+accuracy = TP / (TP + FP + FN) if (TP + FP + FN) > 0 else 0
 
 # Calcular desempenho
 total_preprocess_time = sum(preprocess_times)
@@ -142,7 +154,7 @@ print("\nMétricas gerais de detecção:")
 print(f"Precisão: {precision:.4f}")
 print(f"Recall: {recall:.4f}")
 print(f"F1-Score: {f1_score:.4f}")
-print(f"Acurácia: {accuracy:.4f}")  # Exibindo a acurácia
+print(f"Acurácia: {accuracy:.4f}")
 
 print("\nMétricas de desempenho:")
 print(f"Tempo total de pré-processamento: {total_preprocess_time:.4f} s")
