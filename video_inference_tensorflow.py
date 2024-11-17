@@ -1,17 +1,23 @@
-import os
+import tensorflow as tf
 import cv2
 import numpy as np
-import tensorflow as tf
-from transformers import DetrImageProcessor
 import math
 
-# Configurações
-CONFIDENCE_THRESHOLD = 0.2
-MODEL_PATH = "detr_model_tf"  # Caminho do modelo TensorFlow
-EXCLUSION_ZONE_HEIGHT_RATIO = 0.3  # Excluir 30% superior da imagem
+# Parâmetros do modelo
+MODEL_PATH = "detr_tf_model"  # Caminho para o modelo TensorFlow salvo
+LABELS = ['Person-Mony-Bus-Tramway-Car-Tree', 'Bicycle', 'Bus', 'Car', 'Dog', 'Electric pole', 'Motorcycle', 'Person', 'Traffic signs', 'Tree', 'Uncovered manhole']
+NUM_CLASSES = len(LABELS)
+CONFIDENCE_THRESHOLD = 0.2   # Limite de confiança para exibir detecções
 
-# Multiplicador de perigo adicional para objetos dentro do trapézio
-TRAPEZOID_DANGER_MULTIPLIER = 2
+# Parâmetros de pré-processamento
+IMAGE_SIZE = (1334, 1334)  # Ajuste conforme necessário
+MEAN = np.array([0.485, 0.456, 0.406])  # Média usada na normalização
+STD = np.array([0.229, 0.224, 0.225])   # Desvio padrão usado na normalização
+
+# Configurações adicionais
+NMS_IOU_THRESHOLD = 0.4  # Limite de IOU para NMS
+EXCLUSION_ZONE_HEIGHT_RATIO = 0.3  # Excluir 30% superior da imagem
+TRAPEZOID_DANGER_MULTIPLIER = 2  # Multiplicador de perigo adicional para objetos dentro do trapézio
 
 # Definir cores para cada nível de risco (em formato BGR)
 risk_colors = {
@@ -20,27 +26,6 @@ risk_colors = {
     'medio': (0, 255, 255),       # Amarelo
     'baixo': (0, 255, 0),         # Verde
     'nenhum': (255, 255, 255)     # Branco
-}
-
-# Carregar o modelo TensorFlow
-model = tf.saved_model.load(MODEL_PATH)
-
-# Carregar o image_processor
-image_processor = DetrImageProcessor.from_pretrained("facebook/detr-resnet-50")
-
-# Definir o mapeamento de IDs para labels
-id2label = {
-    0: 'Person-Mony-Bus-Tramway-Car-Tree',
-    1: 'Bicycle',
-    2: 'Bus',
-    3: 'Car',
-    4: 'Dog',
-    5: 'Electric pole',
-    6: 'Motorcycle',
-    7: 'Person',
-    8: 'Traffic signs',
-    9: 'Tree',
-    10: 'Uncovered manhole'
 }
 
 # Definir os níveis de perigo para cada classe
@@ -71,95 +56,128 @@ danger_weights = {
 def get_proximity_weight_exp(normalized_area):
     return int(5 * math.exp(-5 * (1 - normalized_area))) + 1
 
-# Configurar a captura de vídeo
-video_path = 'inference/jorge10.MP4'
-cap = cv2.VideoCapture(video_path)
+# Função para pré-processar as imagens
+def preprocess_image(image):
+    # Redimensionar a imagem
+    image_resized = cv2.resize(image, IMAGE_SIZE)
+    
+    # Converter BGR para RGB
+    image_rgb = cv2.cvtColor(image_resized, cv2.COLOR_BGR2RGB)
+    
+    # Normalizar a imagem
+    image_normalized = (image_rgb / 255.0 - MEAN) / STD
+    
+    # Transpor para (C, H, W)
+    image_transposed = np.transpose(image_normalized, (2, 0, 1))
+    
+    # Expandir dimensões para (1, C, H, W)
+    image_expanded = np.expand_dims(image_transposed, axis=0).astype(np.float32)
+    
+    return image_expanded
 
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+# Função para pós-processar as saídas do modelo
+def postprocess_outputs(outputs, original_image_shape):
+    logits = outputs['logits'][0].numpy()        # (num_queries, num_classes)
+    pred_boxes = outputs['pred_boxes'][0].numpy()  # (num_queries, 4)
 
-    # Redimensionar o frame para 720p
-    new_width = 1280
-    new_height = 720
-    frame = cv2.resize(frame, (new_width, new_height))
+    # Aplicar softmax nos logits para obter probabilidades
+    probas = tf.nn.softmax(logits, axis=-1).numpy()  # (num_queries, num_classes)
 
-    # Adicionar zona de exclusão superior com transparência
-    exclusion_zone_height = int(EXCLUSION_ZONE_HEIGHT_RATIO * new_height)
-    overlay = frame.copy()
-    cv2.rectangle(overlay, (0, 0), (new_width, exclusion_zone_height), (0, 0, 0), -1)
-    frame = cv2.addWeighted(overlay, 0.5, frame, 0.5, 0)  # Transparência escura
+    # Selecionar as classes com maior probabilidade
+    max_probs = np.max(probas[:, :-1], axis=1)  # Exclui a classe 'no object' (última classe)
+    max_classes = np.argmax(probas[:, :-1], axis=1)
+    
+    # Filtrar detecções com confiança abaixo do limite
+    keep = max_probs > CONFIDENCE_THRESHOLD
+    filtered_boxes = pred_boxes[keep]
+    filtered_classes = max_classes[keep]
+    filtered_scores = max_probs[keep]
 
-    # Obter as dimensões da imagem
-    image_height, image_width = frame.shape[:2]
+    # Aplicar NMS
+    if len(filtered_boxes) > 0:
+        # Converter caixas para formato [y1, x1, y2, x2] para o NMS do TensorFlow
+        boxes_tf = filtered_boxes.copy()
+        boxes_tf[:, 0] = filtered_boxes[:, 1] - filtered_boxes[:, 3] / 2  # y_min
+        boxes_tf[:, 1] = filtered_boxes[:, 0] - filtered_boxes[:, 2] / 2  # x_min
+        boxes_tf[:, 2] = filtered_boxes[:, 1] + filtered_boxes[:, 3] / 2  # y_max
+        boxes_tf[:, 3] = filtered_boxes[:, 0] + filtered_boxes[:, 2] / 2  # x_max
 
-    # Converter o frame para RGB
-    image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        selected_indices = tf.image.non_max_suppression(
+            boxes=boxes_tf,
+            scores=filtered_scores,
+            max_output_size=100,
+            iou_threshold=NMS_IOU_THRESHOLD
+        ).numpy()
+        
+        filtered_boxes = filtered_boxes[selected_indices]
+        filtered_classes = filtered_classes[selected_indices]
+        filtered_scores = filtered_scores[selected_indices]
+    else:
+        filtered_boxes = np.array([])
+        filtered_classes = np.array([])
+        filtered_scores = np.array([])
 
-    # Pré-processar a imagem
-    inputs = image_processor(images=image, return_tensors="tf")
+    # Converter caixas para coordenadas da imagem original
+    h_o, w_o = original_image_shape[:2]
+    h, w = IMAGE_SIZE
+    scale_x = w_o / w
+    scale_y = h_o / h
 
-    # Redimensionar os tensores para corresponder às dimensões do modelo ONNX
-    expected_height, expected_width = 1000, 1087  # Ajustar para o modelo exportado
-    pixel_values = tf.image.resize(inputs["pixel_values"], [expected_height, expected_width])
-    pixel_mask = tf.image.resize(tf.cast(inputs["pixel_mask"], tf.float32), [expected_height, expected_width])
-    pixel_mask = tf.cast(pixel_mask, tf.int64)
+    boxes_scaled = filtered_boxes * [w, h, w, h]
+    boxes_scaled[:, [0, 2]] *= scale_x  # Ajuste no eixo x
+    boxes_scaled[:, [1, 3]] *= scale_y  # Ajuste no eixo y
 
-    print("Pixel Values Shape:", pixel_values.shape)
-    print("Pixel Mask Shape:", pixel_mask.shape)
+    # Converter de (cx, cy, w, h) para (x_min, y_min, x_max, y_max)
+    boxes_converted = np.zeros_like(boxes_scaled)
+    boxes_converted[:, 0] = boxes_scaled[:, 0] - boxes_scaled[:, 2] / 2  # x_min
+    boxes_converted[:, 1] = boxes_scaled[:, 1] - boxes_scaled[:, 3] / 2  # y_min
+    boxes_converted[:, 2] = boxes_scaled[:, 0] + boxes_scaled[:, 2] / 2  # x_max
+    boxes_converted[:, 3] = boxes_scaled[:, 1] + boxes_scaled[:, 3] / 2  # y_max
 
-    # Inferência com TensorFlow
-    outputs = model.signatures["serving_default"](
-        pixel_values=pixel_values,
-        pixel_mask=pixel_mask
-    )
+    return boxes_converted, filtered_classes, filtered_scores
 
-    # Verificar as saídas do modelo
-    logits = outputs["logits"].numpy()
-    pred_boxes = outputs["pred_boxes"].numpy()
-    print("Logits Shape:", logits.shape)
-    print("Pred Boxes Shape:", pred_boxes.shape)
-
-    # Pós-processamento
-    boxes = pred_boxes[0]
-    scores = logits[0]
-    labels = np.argmax(scores, axis=-1)
-    confidences = np.max(scores, axis=-1)
-
-    # Filtrar detecções com base no threshold de confiança
-    mask = confidences > CONFIDENCE_THRESHOLD
-    boxes = boxes[mask]
-    labels = labels[mask]
-    confidences = confidences[mask]
-
-    # Converter coordenadas dos boxes para o formato da imagem
-    boxes[:, [0, 2]] *= image_width
-    boxes[:, [1, 3]] *= image_height
-
-    # Variável para acumular o risco total
+# Função para desenhar detecções e calcular riscos
+def draw_detections_and_calculate_risk(image, boxes, classes, scores, frame_count):
     total_risk = 0
-    warning_message = ""  # Variável para armazenar mensagem de alerta
+    warning_message = ""
 
-    # Definir as coordenadas do trapézio de detecção
+    # Obter dimensões da imagem
+    image_height, image_width = image.shape[:2]
+
+    # Definir zona de exclusão
+    exclusion_zone_height = int(EXCLUSION_ZONE_HEIGHT_RATIO * image_height)
+    cv2.rectangle(image, (0, 0), (image_width, exclusion_zone_height), (0, 0, 0), -1)
+    overlay = image.copy()
+    cv2.rectangle(overlay, (0, 0), (image_width, exclusion_zone_height), (0, 0, 0), -1)
+    image = cv2.addWeighted(overlay, 0.5, image, 0.5, 0)
+
+    # Definir coordenadas do trapézio de detecção
     top_left = (int(image_width * 0.45), exclusion_zone_height)
-    top_right = (int(image_width * 0.50), exclusion_zone_height)
+    top_right = (int(image_width * 0.55), exclusion_zone_height)
     bottom_left = (int(image_width * 0.10), image_height)
     bottom_right = (int(image_width * 0.90), image_height)
 
-    # Avaliar as áreas de risco e calcular o risco total
-    for bbox, label_id, confidence in zip(boxes, labels, confidences):
-        label = id2label.get(label_id, f"Unknown({label_id})")
-        x1, y1, x2, y2 = bbox
-        x_center = (x1 + x2) / 2
-        y_center = (y1 + y2) / 2
+    # Desenhar o trapézio de detecção na imagem
+    cv2.line(image, top_left, bottom_left, (0, 255, 0), 2)
+    cv2.line(image, top_right, bottom_right, (0, 255, 0), 2)
+    cv2.line(image, top_left, top_right, (0, 255, 0), 2)
+    cv2.line(image, bottom_left, bottom_right, (0, 255, 0), 2)
+
+    # Lista para armazenar as cores das caixas
+    box_colors = []
+
+    for box, cls, score in zip(boxes, classes, scores):
+        x_min, y_min, x_max, y_max = box.astype(int)
+        label = LABELS[cls]
+        x_center = (x_min + x_max) / 2
+        y_center = (y_min + y_max) / 2
 
         # Verificar se o objeto é um "Uncovered manhole"
         if label == "Uncovered manhole":
-            warning_message = "CUIDADO, BURACO NA PISTA A FRENTE"
+            warning_message = "CUIDADO, BURACO NA PISTA À FRENTE"
 
         # Calcular a área normalizada do bounding box
-        bbox_area = (x2 - x1) * (y2 - y1)
+        bbox_area = (x_max - x_min) * (y_max - y_min)
         image_area = image_width * image_height
         normalized_area = bbox_area / image_area
 
@@ -173,16 +191,16 @@ while True:
         # Verificar se o objeto está dentro do trapézio de detecção
         if (x_center > top_left[0] and x_center < top_right[0] and
                 y_center > top_left[1] and y_center < bottom_left[1]):
-            # Aplicar o multiplicador de perigo adicional
+            # Aplicar o multiplicador de perigo adicional para objetos dentro do trapézio
             object_risk = danger_weight * proximity_weight * TRAPEZOID_DANGER_MULTIPLIER
         else:
-            # Risco sem multiplicador
+            # Risco sem multiplicador para objetos fora do trapézio
             object_risk = danger_weight * proximity_weight
 
         # Acumular o risco total
         total_risk += object_risk
 
-        # Determinar o nível de risco individual
+        # Determinar o nível de risco individual com base no risco do objeto
         if object_risk >= 40:
             individual_risk_level = 'muito_alto'
         elif object_risk >= 10:
@@ -194,41 +212,104 @@ while True:
         else:
             individual_risk_level = 'nenhum'
 
-        # Obter a cor correspondente ao nível de risco
+        # Obter a cor correspondente ao nível de risco individual
         box_color = risk_colors.get(individual_risk_level, (255, 255, 255))  # Branco como padrão
+        box_colors.append(box_color)
 
-        # Desenhar o box no frame
-        x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
-        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
-        cv2.putText(frame, f"{label} {confidence:.2f}", (x1, y1 - 10),
+        # Desenhar retângulo
+        cv2.rectangle(image, (x_min, y_min), (x_max, y_max), box_color, 2)
+
+        # Colocar rótulo
+        label_text = f"{label}: {score:.2f}"
+        cv2.putText(image, label_text, (x_min, y_min - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, box_color, 2)
 
     # Classificar a cena com base no risco total
     if total_risk >= 60:
         risk_level = 'PARE'
     elif total_risk >= 40:
-        risk_level = 'ACONSELHAVEL DIMINUIR A VELOCIDADE'
+        risk_level = 'ACONSELHÁVEL DIMINUIR A VELOCIDADE'
     elif total_risk >= 20:
         risk_level = 'DIMINUA A VELOCIDADE'
     else:
         risk_level = 'SEGURO'
 
     # Exibir o nível de risco no frame
-    cv2.putText(frame, f"Risco: {risk_level} ({int(total_risk)})", (10, 70),
+    cv2.putText(image, f"Risco: {risk_level} ({int(total_risk)})", (10, 70),
                 cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2, cv2.LINE_AA)
 
     # Exibir mensagem de alerta de buraco, se detectado
     if warning_message:
-        cv2.putText(frame, warning_message, (10, 110),
+        cv2.putText(image, warning_message, (10, 110),
                     cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2, cv2.LINE_AA)
 
-    # Exibir o frame
-    cv2.imshow('Video Detection and Classification', frame)
+    return image
 
-    # Pressione 'q' para sair
+# Carregar o modelo TensorFlow
+model = tf.saved_model.load(MODEL_PATH)
+
+# Função de inferência
+infer = model.signatures['serving_default']
+
+# Abrir o vídeo
+VIDEO_PATH = "inference/jorge10.MP4"  # Substitua pelo caminho do seu vídeo
+cap = cv2.VideoCapture(VIDEO_PATH)
+
+# Verificar se o vídeo foi aberto corretamente
+if not cap.isOpened():
+    print("Erro ao abrir o vídeo.")
+    exit()
+
+# Obter propriedades do vídeo
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+fps = cap.get(cv2.CAP_PROP_FPS)
+
+# Definir o codec e criar o objeto VideoWriter
+out = cv2.VideoWriter('video_output.mp4',
+                      cv2.VideoWriter_fourcc(*'mp4v'), fps,
+                      (frame_width, frame_height))
+
+frame_count = 0  # Contador de frames
+
+# Processar o vídeo quadro a quadro
+while cap.isOpened():
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    frame_count += 1
+
+    # Pré-processar o quadro
+    input_tensor = preprocess_image(frame)
+
+    # Criar a máscara de pixel (todos os pixels são válidos)
+    pixel_mask = np.ones((1, IMAGE_SIZE[0], IMAGE_SIZE[1]), dtype=np.float32)
+
+    # Executar inferência
+    inputs = {
+        'pixel_values': tf.constant(input_tensor),
+        'pixel_mask': tf.constant(pixel_mask)
+    }
+    outputs = infer(**inputs)
+
+    # Pós-processar as saídas
+    boxes, classes, scores = postprocess_outputs(outputs, frame.shape)
+
+    # Desenhar detecções e calcular riscos no quadro original
+    frame_with_detections = draw_detections_and_calculate_risk(frame, boxes, classes, scores, frame_count)
+
+    # Exibir o quadro com detecções (opcional)
+    cv2.imshow('Detections', frame_with_detections)
+
+    # Escrever o quadro no vídeo de saída
+    out.write(frame_with_detections)
+
+    # Pressionar 'q' para sair
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
-# Liberar os recursos
+# Liberar recursos
 cap.release()
+out.release()
 cv2.destroyAllWindows()
